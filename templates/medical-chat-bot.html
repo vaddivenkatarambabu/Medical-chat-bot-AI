@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Medical Chatbot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { font-family: Arial, sans-serif; color: #fff; padding: 20px; }
+    .container { max-width: 800px; margin: auto; }
+    textarea { width: 100%; height: 120px; }
+    button { padding: 10px 16px; margin-top: 8px; }
+    #response { white-space: pre-wrap; padding: 12px; margin-top: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; min-height: 80px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Medical Chatbot</h1>
+    <p>Ask a question related to the provided PDFs.</p>
+    <form id="chat-form">
+      <textarea id="msg" name="msg" placeholder="Type your question..."></textarea>
+      <br>
+      <button type="submit">Send</button>
+    </form>
+    <div id="response"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('chat-form');
+    const responseDiv = document.getElementById('response');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('msg').value.trim();
+      if (!msg) return;
+      responseDiv.textContent = 'Thinking...';
+      const formData = new FormData();
+      formData.append('msg', msg);
+      try {
+        const res = await fetch('/get', { method: 'POST', body: formData });
+        const text = await res.text();
+        responseDiv.textContent = text;
+      } catch (err) {
+        responseDiv.textContent = 'Error: ' + err;
+      }
+    });
+  </script>
+</body>
+</html>
