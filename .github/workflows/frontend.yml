@@ -1,0 +1,60 @@
+name: Frontend CI
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: fronted
+
+jobs:
+  quality:
+    name: Frontend quality and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22.19.0"
+          cache: npm
+          cache-dependency-path: fronted/package-lock.json
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci --no-audit
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check Prettier formatting
+        run: npx prettier --check .
+
+      - name: Type-check TypeScript
+        run: npx tsc --noEmit
+
+      - name: Build production application
+        env:
+          VITE_SUPABASE_URL: https://ci.invalid
+          VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder-key
+          VITE_SUPABASE_PROJECT_ID: ci
+          VITE_BACKEND_URL: http://127.0.0.1:1819
+          BACKEND_URL: http://127.0.0.1:1819
+        run: npm run build
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high

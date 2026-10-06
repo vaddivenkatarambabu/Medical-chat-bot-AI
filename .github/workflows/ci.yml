@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Check repository whitespace
+        run: git diff --check
+
+      - name: Check for tracked environment files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tracked_env_files="$(
+            git ls-files \
+              | grep -E '(^|/)\.env($|\.)' \
+              | grep -vE '(^|/)\.env\.example$' \
+              || true
+          )"
+
+          if [[ -n "${tracked_env_files}" ]]; then
+            echo "The repository contains tracked environment files:"
+            echo
+            echo "${tracked_env_files}"
+            echo
+            echo "Commit only .env.example-style templates. Never commit runtime secrets."
+            exit 1
+          fi
+
+  backend:
+    name: Backend CI
+    needs: repository
+    uses: ./.github/workflows/backend.yml
+    permissions:
+      contents: read
+
+  frontend:
+    name: Frontend CI
+    needs: repository
+    uses: ./.github/workflows/frontend.yml
+    permissions:
+      contents: read
