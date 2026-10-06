@@ -47,7 +47,6 @@ from src.supabase_email import (
     send_recovery_email,
 )
 
-
 DEFAULT_INDEX_NAME = "medical-chatbot"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_RETRIEVER_K = 3
@@ -115,11 +114,13 @@ def _get_message() -> str:
 
 def _cors_allowed_origins() -> set[str]:
     configured = set(DEFAULT_DEV_CORS_ORIGINS)
-    configured.update({
-        origin.strip().rstrip("/")
-        for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
-        if origin.strip()
-    })
+    configured.update(
+        {
+            origin.strip().rstrip("/")
+            for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+            if origin.strip()
+        }
+    )
     frontend_url = os.getenv("FRONTEND_URL")
     if frontend_url:
         configured.add(frontend_url.strip().rstrip("/"))
@@ -190,10 +191,12 @@ def _check_rate_limit(scope: str, *, limit: int, window_seconds: int):
     if result.allowed:
         return None
 
-    response = jsonify({
-        "error": "Too many requests. Please try again later.",
-        "retry_after": result.retry_after,
-    })
+    response = jsonify(
+        {
+            "error": "Too many requests. Please try again later.",
+            "retry_after": result.retry_after,
+        }
+    )
     response.status_code = 429
     response.headers["Retry-After"] = str(result.retry_after)
     return response
@@ -207,6 +210,7 @@ def get_rag_chain() -> Any:
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_groq import ChatGroq
     from langchain_pinecone import PineconeVectorStore
+
     from src.helper import download_hugging_face_embeddings
 
     pinecone_api_key = _required_env("PINECONE_API_KEY")
@@ -402,11 +406,13 @@ def create_app() -> Flask:
 
         try:
             settings = get_auth_settings()
-            return jsonify({
-                "email_provider_enabled": settings.email_provider_enabled,
-                "signup_disabled": settings.signup_disabled,
-                "mailer_autoconfirm": settings.mailer_autoconfirm,
-            })
+            return jsonify(
+                {
+                    "email_provider_enabled": settings.email_provider_enabled,
+                    "signup_disabled": settings.signup_disabled,
+                    "mailer_autoconfirm": settings.mailer_autoconfirm,
+                }
+            )
         except SupabaseEmailConfigurationError as exc:
             logger.warning("Supabase email configuration error: %s", exc)
             return jsonify({"error": str(exc)}), 503
@@ -429,10 +435,12 @@ def create_app() -> Flask:
                 payload.redirect_to,
                 create_user=payload.create_user,
             )
-            return jsonify({
-                "ok": True,
-                "message": "Verification email request accepted by Supabase.",
-            })
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": "Verification email request accepted by Supabase.",
+                }
+            )
         except RequestValidationError as exc:
             return jsonify({"error": str(exc)}), 400
         except SupabaseEmailConfigurationError as exc:
@@ -453,10 +461,12 @@ def create_app() -> Flask:
             if not _is_allowed_auth_redirect(payload.redirect_to):
                 return jsonify({"error": "redirect_to is not an allowed auth origin"}), 400
             send_recovery_email(payload.email, payload.redirect_to)
-            return jsonify({
-                "ok": True,
-                "message": "Password recovery email request accepted by Supabase.",
-            })
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": "Password recovery email request accepted by Supabase.",
+                }
+            )
         except RequestValidationError as exc:
             return jsonify({"error": str(exc)}), 400
         except SupabaseEmailConfigurationError as exc:
@@ -483,7 +493,10 @@ def create_app() -> Flask:
             response = get_rag_chain().invoke({"input": message})
         except ConfigurationError as exc:
             logger.warning("Application is not configured: %s", exc)
-            return "The assistant is not configured. Please check server environment variables.", 503
+            return (
+                "The assistant is not configured. Please check server environment variables.",
+                503,
+            )
         except Exception:
             logger.exception("Failed to generate assistant response")
             return "Sorry, I could not generate a response right now. Please try again.", 500

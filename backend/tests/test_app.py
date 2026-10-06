@@ -6,10 +6,10 @@ os.environ["DATABASE_URL"] = (
     f"sqlite:///{(Path(tempfile.gettempdir()) / 'medicore_test.sqlite3').as_posix()}"
 )
 
-import app as app_module
 import pytest
 from sqlalchemy import select
 
+import app as app_module
 from src import models  # noqa: F401
 from src.database import Base, engine, session_scope
 from src.models import Conversation, Message, User
@@ -81,9 +81,7 @@ def test_send_otp_calls_supabase_email_service(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["ok"] is True
-    assert calls == [
-        ("person@example.com", "http://127.0.0.1:8080/verify-otp", True)
-    ]
+    assert calls == [("person@example.com", "http://127.0.0.1:8080/verify-otp", True)]
 
 
 def test_send_otp_can_disable_user_creation(monkeypatch):
@@ -105,9 +103,7 @@ def test_send_otp_can_disable_user_creation(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert calls == [
-        ("person@example.com", "http://127.0.0.1:8080/verify-otp", False)
-    ]
+    assert calls == [("person@example.com", "http://127.0.0.1:8080/verify-otp", False)]
 
 
 def test_send_otp_rejects_untrusted_redirect(monkeypatch):

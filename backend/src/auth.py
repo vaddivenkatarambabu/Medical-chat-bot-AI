@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request as UrlRequest, urlopen
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 import jwt
 from flask import Request
@@ -111,9 +112,7 @@ def _fetch_supabase_user(token: str) -> dict[str, Any] | None:
 def _decode_supabase_token(token: str) -> dict[str, Any]:
     secret = os.getenv("SUPABASE_JWT_SECRET", "").strip()
     if not secret:
-        raise AuthenticationError(
-            "SUPABASE_JWT_SECRET is required to trust backend Bearer tokens"
-        )
+        raise AuthenticationError("SUPABASE_JWT_SECRET is required to trust backend Bearer tokens")
 
     algorithms = [
         item.strip()
@@ -173,12 +172,7 @@ def authenticated_user_from_token(token: str) -> AuthenticatedUser:
         metadata = {}
 
     email = supabase_user.get("email") or claims.get("email")
-    display_name = (
-        metadata.get("full_name")
-        or metadata.get("name")
-        or claims.get("name")
-        or email
-    )
+    display_name = metadata.get("full_name") or metadata.get("name") or claims.get("name") or email
     avatar_url = metadata.get("avatar_url") or claims.get("picture")
     email_verified_at = (
         _parse_datetime(supabase_user.get("email_confirmed_at"))

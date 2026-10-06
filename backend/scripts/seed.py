@@ -2,7 +2,6 @@ from src.auth import RequestIdentity
 from src.database import init_database, session_scope
 from src.repositories import ChatRepository
 
-
 DEMO_GUEST_SESSION_ID = "demo-guest-session"
 
 

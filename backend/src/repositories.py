@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from src.auth import AuthenticatedUser, RequestIdentity
@@ -175,9 +174,7 @@ class ChatRepository:
         return user
 
     def revoke_session(self, db: Session, token_hash: str) -> bool:
-        session = db.scalar(
-            select(UserSession).where(UserSession.token_hash == token_hash)
-        )
+        session = db.scalar(select(UserSession).where(UserSession.token_hash == token_hash))
 
         if session is None:
             return False
@@ -307,14 +304,14 @@ class ChatRepository:
                     parts=_message_parts(message),
                     client_message_id=client_message_id,
                 ),
-            Message(
-                conversation_id=conversation.id,
-                user_id=user.id if user else None,
-                role="assistant",
-                content=answer,
+                Message(
+                    conversation_id=conversation.id,
+                    user_id=user.id if user else None,
+                    role="assistant",
+                    content=answer,
                     parts=_message_parts(answer),
-            ),
-        ]
+                ),
+            ]
         )
         if conversation.title == "New consultation":
             conversation.title = _title_from_message(message)

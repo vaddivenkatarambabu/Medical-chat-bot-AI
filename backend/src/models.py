@@ -98,9 +98,7 @@ class UserSession(Base):
 
     user: Mapped[User] = relationship(back_populates="sessions")
 
-    __table_args__ = (
-        Index("ix_user_sessions_user_last_seen", "user_id", "last_seen_at"),
-    )
+    __table_args__ = (Index("ix_user_sessions_user_last_seen", "user_id", "last_seen_at"),)
 
 
 class Conversation(Base):

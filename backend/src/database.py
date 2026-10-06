@@ -8,7 +8,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-
 DEFAULT_SQLITE_PATH = Path("instance") / "medicore.sqlite3"
 
 load_dotenv()

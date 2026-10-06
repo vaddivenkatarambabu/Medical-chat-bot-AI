@@ -7,7 +7,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -87,9 +86,7 @@ def _json_request(
         message = _extract_error_message(raw) or f"Supabase Auth returned {exc.code}"
         raise SupabaseEmailDeliveryError(message, status_code=exc.code) from exc
     except (URLError, TimeoutError) as exc:
-        raise SupabaseEmailDeliveryError(
-            "Could not reach Supabase Auth email service"
-        ) from exc
+        raise SupabaseEmailDeliveryError("Could not reach Supabase Auth email service") from exc
     except json.JSONDecodeError:
         return {}
 
@@ -124,13 +121,9 @@ def get_auth_settings() -> SupabaseAuthSettings:
 def send_email_otp(email: str, redirect_to: str, *, create_user: bool = True) -> None:
     settings = get_auth_settings()
     if not settings.email_provider_enabled:
-        raise SupabaseEmailConfigurationError(
-            "Supabase Email Auth is disabled for this project"
-        )
+        raise SupabaseEmailConfigurationError("Supabase Email Auth is disabled for this project")
     if settings.signup_disabled:
-        raise SupabaseEmailConfigurationError(
-            "Supabase signups are disabled for this project"
-        )
+        raise SupabaseEmailConfigurationError("Supabase signups are disabled for this project")
 
     _json_request(
         "POST",
@@ -151,9 +144,7 @@ def send_email_otp(email: str, redirect_to: str, *, create_user: bool = True) ->
 def send_recovery_email(email: str, redirect_to: str) -> None:
     settings = get_auth_settings()
     if not settings.email_provider_enabled:
-        raise SupabaseEmailConfigurationError(
-            "Supabase Email Auth is disabled for this project"
-        )
+        raise SupabaseEmailConfigurationError("Supabase Email Auth is disabled for this project")
 
     _json_request(
         "POST",

@@ -1,10 +1,9 @@
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 from flask import Request
-
 
 MAX_TITLE_LENGTH = 120
 MAX_EXTERNAL_ID_LENGTH = 255

@@ -5,10 +5,16 @@ line-length = 100
 exclude = [
     ".git",
     ".venv",
+    ".venv-ci",
     "__pycache__",
     "build",
     "dist",
     "instance",
+]
+
+# Research notebook is experimental and is not part of production Python CI.
+extend-exclude = [
+    "research/trials.ipynb",
 ]
 
 [tool.ruff.lint]
@@ -20,13 +26,22 @@ select = [
     "I",
 ]
 
-# Existing code uses a deliberate 100-character project style.
-# Formatting is enforced separately by `ruff format`.
 ignore = [
     "E501",
+]
+
+# app.py deliberately loads environment configuration before importing
+# application/provider modules. Those imports must remain below load_dotenv().
+[tool.ruff.lint.per-file-ignores]
+"app.py" = [
+    "E402",
 ]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
