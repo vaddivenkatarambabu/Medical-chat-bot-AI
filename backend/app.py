@@ -205,8 +205,8 @@ def _check_rate_limit(scope: str, *, limit: int, window_seconds: int):
 @lru_cache(maxsize=1)
 def get_rag_chain() -> Any:
     """Build the retrieval augmented generation chain once per process."""
-    from langchain.chains import create_retrieval_chain
-    from langchain.chains.combine_documents import create_stuff_documents_chain
+    from langchain_classic.chains import create_retrieval_chain
+    from langchain_classic.chains.combine_documents import create_stuff_documents_chain
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_groq import ChatGroq
     from langchain_pinecone import PineconeVectorStore
