@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import logo from "@/assets/medicore-logo.png";
-import type { ChatMessage } from "@/lib/conversations.functions";
+import type { ChatMessage, ChatSource } from "@/lib/conversations.functions";
 
 // Extracted as a constant to avoid creating a new object on every render
 const BUBBLE_TRANSITION = { duration: 0.25 };
@@ -17,6 +17,16 @@ const TYPING_DOT_DELAYS = [0, 0.15, 0.3];
 
 function getText(m: ChatMessage): string {
   return m.parts.map((p) => (p.type === "text" ? p.text : "")).join("");
+}
+
+function sourceLabel(source: ChatSource): string {
+  const sourceName = source.source.split(/[\\/]/).pop() || source.source;
+  const page =
+    source.page_label ?? (source.page === undefined ? null : source.page);
+
+  return page === null || page === undefined
+    ? sourceName
+    : `${sourceName}, p. ${page}`;
 }
 
 export function MessageBubble({ message }: { message: ChatMessage }) {
@@ -86,12 +96,25 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           )}
         </div>
         {!isUser && text && (
-          <div className="opacity-0 group-hover:opacity-100 transition mt-1 flex">
+          <div className="mt-1 flex flex-col gap-1">
+            {message.sources && message.sources.length > 0 && (
+              <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+                {message.sources.map((source, index) => (
+                  <span
+                    key={`${source.source}-${source.page ?? ""}-${index}`}
+                    className="rounded border px-1.5 py-0.5"
+                  >
+                    {sourceLabel(source)}
+                  </span>
+                ))}
+              </div>
+            )}
             <Button
               size="icon-sm"
               variant="ghost"
               onClick={copy}
               aria-label="Copy message"
+              className="opacity-0 transition group-hover:opacity-100"
             >
               {copied ? (
                 <Check className="h-3.5 w-3.5" />

@@ -27,6 +27,12 @@ function NewChatRedirect() {
           error: sessionError,
         } = await supabase.auth.getSession();
 
+        if (sessionError) {
+          console.warn("Supabase session check failed before chat start", {
+            message: sessionError.message,
+          });
+        }
+
         if (sessionError || !session?.user) {
           navigate({
             to: "/chat/$conversationId",

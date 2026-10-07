@@ -23,10 +23,19 @@ export type ChatMessagePart = {
   state?: "streaming" | "done";
 };
 
+export type ChatSource = {
+  source: string;
+  page?: number | string | null;
+  page_label?: string | null;
+  chunk?: number | string | null;
+  knowledge_base_version?: string | null;
+};
+
 export type ChatMessage = {
   id: string;
   role: "system" | "user" | "assistant";
   parts: ChatMessagePart[];
+  sources?: ChatSource[];
 };
 
 export type ConversationSummary = {
@@ -46,6 +55,10 @@ type BackendMessage = {
   client_message_id?: string | null;
 };
 
+type GuestSessionResponse = {
+  guest_session_id?: string;
+};
+
 export function getGuestSessionId(): string | null {
   if (typeof window === "undefined") {
     return null;
@@ -58,9 +71,36 @@ export function getGuestSessionId(): string | null {
   }
 }
 
-export function ensureGuestSessionId(): string {
+async function requestGuestSessionId(): Promise<string | null> {
+  if (!getBackendUrl()) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(backendUrl("/api/guest-session"), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as GuestSessionResponse;
+    return typeof data.guest_session_id === "string"
+      ? data.guest_session_id
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function ensureGuestSessionId(): Promise<string> {
   if (typeof window === "undefined") {
-    return nanoid();
+    return (await requestGuestSessionId()) ?? nanoid();
   }
 
   const existing = getGuestSessionId();
@@ -68,7 +108,7 @@ export function ensureGuestSessionId(): string {
     return existing;
   }
 
-  const created = nanoid();
+  const created = (await requestGuestSessionId()) ?? nanoid();
 
   try {
     window.localStorage.setItem(GUEST_SESSION_STORAGE_KEY, created);
@@ -200,7 +240,7 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 
 export async function createConversation(data: { title?: string } = {}) {
   const token = await getAccessToken();
-  const guestSessionId = token ? null : ensureGuestSessionId();
+  const guestSessionId = token ? null : await ensureGuestSessionId();
 
   const body = {
     ...data,

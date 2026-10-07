@@ -13,9 +13,13 @@ export const Route = createFileRoute("/_authenticated")({
       return {
         user: session?.user ?? null,
       };
-    } catch {
+    } catch (error) {
+      console.warn("Authenticated route session check failed", {
+        message: error instanceof Error ? error.message : "unknown error",
+      });
       return {
         user: null,
+        authError: true,
       };
     }
   },

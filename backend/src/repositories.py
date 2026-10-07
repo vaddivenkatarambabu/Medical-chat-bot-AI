@@ -234,31 +234,17 @@ class ChatRepository:
         guest_session_id: str | None,
         first_message: str,
     ) -> Conversation:
-        external_id = _external_conversation_id(conversation_id, guest_session_id)
-
-        conversation = None
-        if conversation_id and conversation_id != "guest":
-            filters = [Conversation.id == conversation_id]
-            if external_id:
-                filters.append(Conversation.external_id == external_id)
-
-            conversation = db.scalar(
-                select(Conversation).where(
-                    or_(*filters),
-                    Conversation.user_id == (user.id if user else None),
-                )
-            )
-        elif external_id:
-            conversation = db.scalar(
-                select(Conversation).where(
-                    Conversation.external_id == external_id,
-                    Conversation.user_id == (user.id if user else None),
-                )
-            )
+        conversation = self.find_conversation_for_turn(
+            db,
+            user=user,
+            conversation_id=conversation_id,
+            guest_session_id=guest_session_id,
+        )
 
         if conversation is not None:
             return conversation
 
+        external_id = _external_conversation_id(conversation_id, guest_session_id)
         return self.create_conversation(
             db,
             user,
@@ -266,6 +252,90 @@ class ChatRepository:
             external_id=external_id,
             guest_session_id=guest_session_id,
         )
+
+    def find_conversation_for_turn(
+        self,
+        db: Session,
+        *,
+        user: User | None,
+        conversation_id: str | None,
+        guest_session_id: str | None,
+    ) -> Conversation | None:
+        if user is None:
+            return None
+
+        external_id = _external_conversation_id(conversation_id, guest_session_id)
+
+        if conversation_id and conversation_id != "guest":
+            filters = [Conversation.id == conversation_id]
+            if external_id:
+                filters.append(Conversation.external_id == external_id)
+
+            return db.scalar(
+                select(Conversation).where(
+                    or_(*filters),
+                    Conversation.user_id == user.id,
+                )
+            )
+
+        if external_id:
+            return db.scalar(
+                select(Conversation).where(
+                    Conversation.external_id == external_id,
+                    Conversation.user_id == user.id,
+                )
+            )
+
+        return None
+
+    def list_recent_messages(
+        self,
+        db: Session,
+        conversation: Conversation,
+        *,
+        limit: int,
+    ) -> list[Message]:
+        if limit <= 0:
+            return []
+
+        messages = list(
+            db.scalars(
+                select(Message)
+                .where(Message.conversation_id == conversation.id)
+                .order_by(Message.created_at.desc())
+                .limit(limit)
+            )
+        )
+        return list(reversed(messages))
+
+    def find_saved_assistant_answer(
+        self,
+        db: Session,
+        *,
+        conversation: Conversation,
+        client_message_id: str,
+    ) -> str | None:
+        user_message = db.scalar(
+            select(Message).where(
+                Message.conversation_id == conversation.id,
+                Message.role == "user",
+                Message.client_message_id == client_message_id,
+            )
+        )
+        if user_message is None:
+            return None
+
+        assistant_message = db.scalar(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation.id,
+                Message.role == "assistant",
+                Message.created_at >= user_message.created_at,
+            )
+            .order_by(Message.created_at.asc())
+            .limit(1)
+        )
+        return assistant_message.content if assistant_message else None
 
     def save_chat_turn(
         self,
@@ -293,6 +363,15 @@ class ChatRepository:
             guest_session_id=identity.guest_session_id,
             first_message=message,
         )
+
+        if client_message_id:
+            existing_answer = self.find_saved_assistant_answer(
+                db,
+                conversation=conversation,
+                client_message_id=client_message_id,
+            )
+            if existing_answer is not None:
+                return conversation
 
         db.add_all(
             [

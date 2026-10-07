@@ -11,18 +11,40 @@ from sqlalchemy import select
 
 import app as app_module
 from src import models  # noqa: F401
+from src.auth import create_guest_session_credential
 from src.database import Base, engine, session_scope
 from src.models import Conversation, Message, User
 
 
+class FakeDocument:
+    def __init__(self, metadata):
+        self.metadata = metadata
+
+
 class FakeChain:
+    calls = []
+
     def invoke(self, payload):
-        return {"answer": f"answer for {payload['input']}"}
+        self.calls.append(payload)
+        return {
+            "answer": f"answer for {payload['input']}",
+            "context": [
+                FakeDocument(
+                    {
+                        "source": "data/test.pdf",
+                        "page": 4,
+                        "chunk": 2,
+                        "knowledge_base_version": "test",
+                    }
+                )
+            ],
+        }
 
 
 @pytest.fixture(autouse=True)
 def reset_database():
     app_module.rate_limiter = app_module.RateLimiter()
+    FakeChain.calls = []
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield
@@ -140,7 +162,7 @@ def test_chat_rejects_empty_message():
     response = client.post("/get", data={"msg": "   "})
 
     assert response.status_code == 400
-    assert "Please enter" in response.get_data(as_text=True)
+    assert "Please enter" in response.get_json()["error"]
 
 
 def test_chat_rejects_long_message():
@@ -149,7 +171,7 @@ def test_chat_rejects_long_message():
     response = client.post("/get", data={"msg": "x" * (app_module.MAX_MESSAGE_LENGTH + 1)})
 
     assert response.status_code == 413
-    assert "too long" in response.get_data(as_text=True)
+    assert "too long" in response.get_json()["error"]
 
 
 def test_chat_returns_chain_answer(monkeypatch):
@@ -159,7 +181,15 @@ def test_chat_returns_chain_answer(monkeypatch):
     response = client.post("/get", data={"msg": "What is fever?"})
 
     assert response.status_code == 200
-    assert response.get_data(as_text=True) == "answer for What is fever?"
+    assert response.get_json()["answer"] == "answer for What is fever?"
+    assert response.get_json()["sources"] == [
+        {
+            "source": "data/test.pdf",
+            "page": 4,
+            "chunk": 2,
+            "knowledge_base_version": "test",
+        }
+    ]
 
 
 def test_chat_accepts_json_payload(monkeypatch):
@@ -169,7 +199,7 @@ def test_chat_accepts_json_payload(monkeypatch):
     response = client.post("/get", json={"message": "What is cough?"})
 
     assert response.status_code == 200
-    assert response.get_data(as_text=True) == "answer for What is cough?"
+    assert response.get_json()["answer"] == "answer for What is cough?"
 
 
 def test_chat_persists_guest_turn(monkeypatch):
@@ -261,7 +291,116 @@ def test_chat_returns_configuration_error(monkeypatch):
     response = client.post("/get", data={"msg": "What is fever?"})
 
     assert response.status_code == 503
-    assert "not configured" in response.get_data(as_text=True)
+    assert "not configured" in response.get_json()["error"]
+
+
+def test_chat_is_rate_limited(monkeypatch):
+    monkeypatch.setenv("CHAT_RATE_LIMIT", "1")
+    monkeypatch.setenv("CHAT_RATE_LIMIT_WINDOW_SECONDS", "60")
+    monkeypatch.setattr(app_module, "get_rag_chain", lambda: FakeChain())
+    client = app_module.create_app().test_client()
+
+    first = client.post("/get", json={"message": "What is fever?"})
+    second = client.post("/get", json={"message": "What is cough?"})
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["Retry-After"]
+
+
+def test_chat_includes_recent_conversation_history(monkeypatch):
+    monkeypatch.setattr(app_module, "get_rag_chain", lambda: FakeChain())
+    client = app_module.create_app().test_client()
+
+    created = client.post(
+        "/api/conversations",
+        json={"guest_session_id": "guest-session-1"},
+    )
+    conversation_id = created.get_json()["id"]
+
+    first = client.post(
+        "/get",
+        json={
+            "message": "What is fever?",
+            "conversation_id": conversation_id,
+            "client_message_id": "client-message-1",
+            "guest_session_id": "guest-session-1",
+        },
+    )
+    second = client.post(
+        "/get",
+        json={
+            "message": "What did I ask before?",
+            "conversation_id": conversation_id,
+            "client_message_id": "client-message-2",
+            "guest_session_id": "guest-session-1",
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "User: What is fever?" in FakeChain.calls[-1]["conversation_history"]
+    assert "Assistant: answer for What is fever?" in FakeChain.calls[-1]["conversation_history"]
+
+
+def test_duplicate_client_message_returns_saved_answer(monkeypatch):
+    chain = FakeChain()
+    monkeypatch.setattr(app_module, "get_rag_chain", lambda: chain)
+    client = app_module.create_app().test_client()
+
+    payload = {
+        "message": "What is fever?",
+        "conversation_id": "guest",
+        "client_message_id": "client-message-1",
+        "guest_session_id": "guest-session-1",
+    }
+
+    first = client.post("/get", json=payload)
+    second = client.post("/get", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.get_json() == {
+        "answer": "answer for What is fever?",
+        "sources": [],
+    }
+    assert len(FakeChain.calls) == 1
+
+
+def test_guest_session_endpoint_issues_signed_credential(monkeypatch):
+    monkeypatch.setenv("GUEST_SESSION_SECRET", "test-secret")
+    client = app_module.create_app().test_client()
+
+    response = client.post("/api/guest-session")
+
+    assert response.status_code == 200
+    credential = response.get_json()["guest_session_id"]
+    assert credential.startswith("gst1.")
+
+
+def test_signed_guest_session_persists_under_stable_identity(monkeypatch):
+    monkeypatch.setenv("GUEST_SESSION_SECRET", "test-secret")
+    monkeypatch.setattr(app_module, "get_rag_chain", lambda: FakeChain())
+    credential, _expires_at = create_guest_session_credential()
+    client = app_module.create_app().test_client()
+
+    response = client.post(
+        "/get",
+        json={
+            "message": "What is cough?",
+            "conversation_id": "guest",
+            "client_message_id": "client-message-1",
+            "guest_session_id": credential,
+        },
+    )
+
+    assert response.status_code == 200
+
+    with session_scope() as db:
+        user = db.scalar(select(User))
+
+    assert user.auth_provider == "guest"
+    assert user.external_id != credential
 
 
 def test_env_int_rejects_invalid_range(monkeypatch):

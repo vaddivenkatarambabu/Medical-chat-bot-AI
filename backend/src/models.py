@@ -171,6 +171,12 @@ class Message(Base):
             "role IN ('system', 'user', 'assistant')",
             name="ck_chat_messages_role",
         ),
+        UniqueConstraint(
+            "conversation_id",
+            "role",
+            "client_message_id",
+            name="uq_chat_messages_conversation_role_client_message",
+        ),
         Index("ix_chat_messages_conversation_created", "conversation_id", "created_at"),
         Index("ix_chat_messages_user_created", "user_id", "created_at"),
         Index("ix_chat_messages_client_message_id", "client_message_id"),

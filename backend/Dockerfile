@@ -12,6 +12,10 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY . .
+RUN adduser --disabled-password --gecos "" --home /app medicore \
+    && chown -R medicore:medicore /app
+
+USER medicore
 
 EXPOSE 7860
 

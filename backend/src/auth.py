@@ -1,8 +1,11 @@
 import hashlib
+import hmac
 import json
 import os
+import re
+import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest
@@ -15,6 +18,12 @@ from jwt import InvalidTokenError
 
 class AuthenticationError(RuntimeError):
     pass
+
+
+GUEST_SESSION_PREFIX = "gst1"
+GUEST_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+DEFAULT_GUEST_SESSION_TTL_DAYS = 30
+MAX_GUEST_SESSION_TTL_DAYS = 90
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,105 @@ class RequestIdentity:
 
 def token_sha256(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise AuthenticationError(f"{name} must be an integer") from exc
+
+    if parsed < minimum or parsed > maximum:
+        raise AuthenticationError(f"{name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _guest_session_secret() -> str:
+    return os.getenv("GUEST_SESSION_SECRET", "").strip()
+
+
+def _guest_session_ttl() -> timedelta:
+    days = _env_int(
+        "GUEST_SESSION_TTL_DAYS",
+        DEFAULT_GUEST_SESSION_TTL_DAYS,
+        minimum=1,
+        maximum=MAX_GUEST_SESSION_TTL_DAYS,
+    )
+    return timedelta(days=days)
+
+
+def _allow_unsigned_guest_sessions() -> bool:
+    return os.getenv("ALLOW_UNSIGNED_GUEST_SESSIONS", "1").strip() != "0"
+
+
+def _validate_unsigned_guest_session_id(value: str) -> str:
+    if not GUEST_SESSION_ID_PATTERN.match(value):
+        raise AuthenticationError("Invalid guest session")
+    return value
+
+
+def _guest_signature(body: str, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def create_guest_session_credential() -> tuple[str, datetime]:
+    session_id = secrets.token_urlsafe(24)
+    expires_at = datetime.now(timezone.utc) + _guest_session_ttl()
+    secret = _guest_session_secret()
+
+    if not secret:
+        return session_id, expires_at
+
+    body = f"{GUEST_SESSION_PREFIX}.{session_id}.{int(expires_at.timestamp())}"
+    signature = _guest_signature(body, secret)
+    return f"{body}.{signature}", expires_at
+
+
+def normalize_guest_session_id(value: str | None) -> str | None:
+    if not value:
+        return None
+
+    credential = value.strip()
+    if not credential:
+        return None
+
+    if not credential.startswith(f"{GUEST_SESSION_PREFIX}."):
+        if _allow_unsigned_guest_sessions():
+            return _validate_unsigned_guest_session_id(credential)
+        raise AuthenticationError("Signed guest session is required")
+
+    secret = _guest_session_secret()
+    if not secret:
+        raise AuthenticationError("GUEST_SESSION_SECRET is required for signed guest sessions")
+
+    parts = credential.split(".")
+    if len(parts) != 4:
+        raise AuthenticationError("Invalid guest session")
+
+    prefix, session_id, expires_at_raw, signature = parts
+    if prefix != GUEST_SESSION_PREFIX:
+        raise AuthenticationError("Invalid guest session")
+
+    session_id = _validate_unsigned_guest_session_id(session_id)
+
+    try:
+        expires_at = int(expires_at_raw)
+    except ValueError as exc:
+        raise AuthenticationError("Invalid guest session") from exc
+
+    if datetime.now(timezone.utc).timestamp() >= expires_at:
+        raise AuthenticationError("Guest session expired")
+
+    body = f"{prefix}.{session_id}.{expires_at_raw}"
+    expected = _guest_signature(body, secret)
+    if not hmac.compare_digest(signature, expected):
+        raise AuthenticationError("Invalid guest session")
+
+    return session_id
 
 
 def extract_bearer_token(request: Request) -> str | None:
@@ -220,5 +328,5 @@ def get_request_identity(
     header_guest_session_id = request.headers.get("X-Guest-Session-Id")
     return RequestIdentity(
         user=None,
-        guest_session_id=guest_session_id or header_guest_session_id,
+        guest_session_id=normalize_guest_session_id(guest_session_id or header_guest_session_id),
     )

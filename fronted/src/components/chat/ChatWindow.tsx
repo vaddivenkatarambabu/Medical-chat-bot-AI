@@ -11,6 +11,7 @@ import {
   getAccessToken,
   getMessages,
   type ChatMessage,
+  type ChatSource,
 } from "@/lib/conversations.functions";
 import { backendUrl, getBackendUrl, readApiError } from "@/lib/api";
 import { Logo } from "@/components/brand/Logo";
@@ -25,6 +26,7 @@ const REQUEST_TIMEOUT_MS = 60000;
 function createTextMessage(
   role: "user" | "assistant",
   text: string,
+  sources?: ChatSource[],
 ): ChatMessage {
   return {
     id: nanoid(),
@@ -35,7 +37,18 @@ function createTextMessage(
         text,
       },
     ],
+    ...(sources && sources.length > 0 ? { sources } : {}),
   };
+}
+
+function isChatSource(value: unknown): value is ChatSource {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "source" in value &&
+    typeof value.source === "string" &&
+    value.source.trim().length > 0
+  );
 }
 
 export function ChatWindow({ conversationId }: { conversationId: string }) {
@@ -142,7 +155,7 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
 
       try {
         const token = await getAccessToken();
-        const guestSessionId = token ? undefined : ensureGuestSessionId();
+        const guestSessionId = token ? undefined : await ensureGuestSessionId();
 
         userMessage = createTextMessage("user", value);
 
@@ -195,12 +208,16 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
         const contentType = res.headers.get("content-type") ?? "";
 
         let answerText = "";
+        let sources: ChatSource[] = [];
 
         if (contentType.includes("application/json")) {
           const data = await res.json();
 
           const answer = data?.answer ?? data?.message ?? "";
           answerText = typeof answer === "string" ? answer : String(answer);
+          sources = Array.isArray(data?.sources)
+            ? data.sources.filter(isChatSource)
+            : [];
         } else {
           answerText = await res.text();
         }
@@ -208,7 +225,11 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
         const safeAnswer =
           answerText.trim() || "Sorry, I couldn't generate a response.";
 
-        const assistantMessage = createTextMessage("assistant", safeAnswer);
+        const assistantMessage = createTextMessage(
+          "assistant",
+          safeAnswer,
+          sources,
+        );
 
         setMessages((prev) => [...prev, assistantMessage]);
 

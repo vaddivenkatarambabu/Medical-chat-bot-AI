@@ -108,13 +108,25 @@ export async function syncBackendAuthSession(): Promise<void> {
     return;
   }
 
-  await fetch(backendUrl("/api/auth/session"), {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${session.access_token}`,
-    },
-  }).catch(() => undefined);
+  try {
+    const response = await fetch(backendUrl("/api/auth/session"), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.warn("Backend auth session sync failed", {
+        status: response.status,
+      });
+    }
+  } catch (error) {
+    console.warn("Backend auth session sync unavailable", {
+      message: error instanceof Error ? error.message : "unknown error",
+    });
+  }
 }
 
 export async function revokeBackendAuthSession(): Promise<void> {
@@ -130,11 +142,23 @@ export async function revokeBackendAuthSession(): Promise<void> {
     return;
   }
 
-  await fetch(backendUrl("/api/auth/logout"), {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${session.access_token}`,
-    },
-  }).catch(() => undefined);
+  try {
+    const response = await fetch(backendUrl("/api/auth/logout"), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.warn("Backend auth session revoke failed", {
+        status: response.status,
+      });
+    }
+  } catch (error) {
+    console.warn("Backend auth session revoke unavailable", {
+      message: error instanceof Error ? error.message : "unknown error",
+    });
+  }
 }
