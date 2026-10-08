@@ -25,6 +25,7 @@ from src.auth import (
     extract_bearer_token,
     get_request_identity,
     token_sha256,
+    validate_auth_configuration,
 )
 from src.database import check_database, init_database, session_scope
 from src.prompt import system_prompt
@@ -425,6 +426,7 @@ def get_rag_chain() -> Any:
 
 
 def create_app() -> Flask:
+    validate_auth_configuration()
     init_database()
 
     app = Flask(__name__)
