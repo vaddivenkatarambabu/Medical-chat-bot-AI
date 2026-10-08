@@ -236,7 +236,7 @@ Default K:
 3
 
 LLM:
-llama-3.3-70b-versatile
+openai/gpt-oss-120b
 
 Temperature:
 0.2
@@ -482,7 +482,7 @@ PINECONE_REGION=us-east-1
 
 RETRIEVER_K=3
 
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 GROQ_TEMPERATURE=0.2
 GROQ_MAX_TOKENS=1024
 
@@ -1167,7 +1167,7 @@ SUPABASE_JWT_SECRET=...
 PINECONE_INDEX_NAME=medical-chatbot
 
 RETRIEVER_K=3
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 GROQ_TEMPERATURE=0.2
 GROQ_MAX_TOKENS=1024
 

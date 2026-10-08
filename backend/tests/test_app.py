@@ -662,6 +662,24 @@ def test_env_int_rejects_invalid_range(
         raise AssertionError("ConfigurationError was not raised")
 
 
+def test_retired_groq_model_uses_available_replacement(monkeypatch):
+    monkeypatch.setenv(
+        "GROQ_MODEL",
+        "llama-3.3-70b-versatile",
+    )
+
+    assert app_module._groq_model_name() == app_module.DEFAULT_GROQ_MODEL
+
+
+def test_groq_model_keeps_supported_explicit_configuration(monkeypatch):
+    monkeypatch.setenv(
+        "GROQ_MODEL",
+        "qwen/qwen3.8-27b",
+    )
+
+    assert app_module._groq_model_name() == "qwen/qwen3.8-27b"
+
+
 def test_supabase_api_fallback_uses_authoritative_user_identity(
     monkeypatch,
 ):

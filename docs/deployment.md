@@ -166,7 +166,7 @@ Do not change the embedding model without rebuilding the vector index.
 Current defaults:
 
 RETRIEVER_K=3
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 GROQ_TEMPERATURE=0.2
 GROQ_MAX_TOKENS=1024
 

@@ -164,7 +164,7 @@ SUPABASE_JWT_SECRET=your_supabase_jwt_secret
 ```env
 PINECONE_INDEX_NAME=medical-chatbot
 RETRIEVER_K=3
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 GROQ_TEMPERATURE=0.2
 GROQ_MAX_TOKENS=1024
 FRONTEND_URL=https://your-frontend.example.com

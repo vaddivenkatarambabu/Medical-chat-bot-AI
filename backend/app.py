@@ -54,7 +54,12 @@ from src.supabase_email import (
 )
 
 DEFAULT_INDEX_NAME = "medical-chatbot"
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+# The previous Llama model was retired by Groq. This is the currently available
+# high-quality chat model used when GROQ_MODEL is not explicitly configured.
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+RETIRED_GROQ_MODEL_REPLACEMENTS = {
+    "llama-3.3-70b-versatile": DEFAULT_GROQ_MODEL,
+}
 DEFAULT_RETRIEVER_K = 3
 MAX_RETRIEVER_K = 10
 DEFAULT_GROQ_MAX_TOKENS = 1024
@@ -132,6 +137,22 @@ def _env_float(
     if maximum is not None and parsed > maximum:
         raise ConfigurationError(f"{name} must be at most {maximum}")
     return parsed
+
+
+def _groq_model_name() -> str:
+    configured_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
+    model_name = configured_model or DEFAULT_GROQ_MODEL
+    replacement = RETIRED_GROQ_MODEL_REPLACEMENTS.get(model_name)
+
+    if replacement:
+        logger.warning(
+            "GROQ_MODEL=%s has been retired; using %s instead",
+            model_name,
+            replacement,
+        )
+        return replacement
+
+    return model_name
 
 
 def _cors_allowed_origins() -> set[str]:
@@ -405,7 +426,7 @@ def get_rag_chain() -> Any:
 
     llm = ChatGroq(
         groq_api_key=groq_api_key,
-        model_name=os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
+        model_name=_groq_model_name(),
         temperature=_env_float("GROQ_TEMPERATURE", 0.2, minimum=0.0, maximum=1.0),
         max_tokens=_env_int(
             "GROQ_MAX_TOKENS",

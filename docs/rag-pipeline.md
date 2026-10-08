@@ -463,7 +463,7 @@ langchain_groq.ChatGroq
 Default model:
 
 ```text
-llama-3.3-70b-versatile
+openai/gpt-oss-120b
 ```
 
 Configuration:
