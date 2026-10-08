@@ -617,9 +617,19 @@ def test_env_int_rejects_invalid_range(
 def test_supabase_api_fallback_uses_authoritative_user_identity(
     monkeypatch,
 ):
+    monkeypatch.setenv(
+        "APP_ENV",
+        "test",
+    )
+
     monkeypatch.delenv(
         "SUPABASE_JWT_SECRET",
         raising=False,
+    )
+
+    monkeypatch.setenv(
+        "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+        "1",
     )
 
     monkeypatch.setattr(
@@ -661,9 +671,19 @@ def test_supabase_api_fallback_uses_authoritative_user_identity(
 def test_supabase_api_fallback_rejects_missing_user(
     monkeypatch,
 ):
+    monkeypatch.setenv(
+        "APP_ENV",
+        "test",
+    )
+
     monkeypatch.delenv(
         "SUPABASE_JWT_SECRET",
         raising=False,
+    )
+
+    monkeypatch.setenv(
+        "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+        "1",
     )
 
     monkeypatch.setattr(
@@ -717,3 +737,92 @@ def test_verified_jwt_identity_must_match_supabase_user(
 
     else:
         raise AssertionError("AuthenticationError was not raised")
+
+def test_production_auth_requires_jwt_secret(monkeypatch):
+    monkeypatch.setenv(
+        "APP_ENV",
+        "production",
+    )
+
+    monkeypatch.delenv(
+        "SUPABASE_JWT_SECRET",
+        raising=False,
+    )
+
+    monkeypatch.setenv(
+        "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+        "0",
+    )
+
+    with pytest.raises(
+        auth_module.AuthenticationError,
+        match="SUPABASE_JWT_SECRET is required",
+    ):
+        auth_module.validate_auth_configuration()
+
+
+def test_production_auth_rejects_api_fallback(monkeypatch):
+    monkeypatch.setenv(
+        "APP_ENV",
+        "production",
+    )
+
+    monkeypatch.setenv(
+        "SUPABASE_JWT_SECRET",
+        "test-secret",
+    )
+
+    monkeypatch.setenv(
+        "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+        "1",
+    )
+
+    with pytest.raises(
+        auth_module.AuthenticationError,
+        match="ALLOW_SUPABASE_API_AUTH_FALLBACK",
+    ):
+        auth_module.validate_auth_configuration()
+
+
+def test_production_auth_accepts_secure_configuration(monkeypatch):
+    monkeypatch.setenv(
+        "APP_ENV",
+        "production",
+    )
+
+    monkeypatch.setenv(
+        "SUPABASE_JWT_SECRET",
+        "test-secret",
+    )
+
+    monkeypatch.setenv(
+        "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+        "0",
+    )
+
+    auth_module.validate_auth_configuration()
+
+
+def test_development_auth_requires_explicit_fallback(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "APP_ENV",
+        "development",
+    )
+
+    monkeypatch.delenv(
+        "SUPABASE_JWT_SECRET",
+        raising=False,
+    )
+
+    monkeypatch.setenv(
+        "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+        "0",
+    )
+
+    with pytest.raises(
+        auth_module.AuthenticationError,
+        match="Backend JWT verification is not configured",
+    ):
+        auth_module.authenticated_user_from_token("fake-token")

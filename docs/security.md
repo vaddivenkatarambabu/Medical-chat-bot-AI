@@ -109,29 +109,14 @@ The backend validates the token and converts the identity into an application us
 
 ---
 
-# 7. JWT Verification
+# 7. Authentication Configuration Modes
 
-When:
+Authentication behavior is controlled explicitly through:
 
 ```text
+APP_ENV
 SUPABASE_JWT_SECRET
-```
-
-is configured, the backend performs local JWT verification using:
-
-```text
-SUPABASE_JWT_ALGORITHMS
-SUPABASE_JWT_AUDIENCE
-```
-
-The token is required to contain:
-
-```text
-exp
-sub
-```
-
-This is the preferred server-side verification path.
+ALLOW_SUPABASE_API_AUTH_FALLBACK
 
 ---
 

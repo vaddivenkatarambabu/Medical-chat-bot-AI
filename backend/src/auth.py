@@ -18,6 +18,72 @@ from jwt import InvalidTokenError
 
 class AuthenticationError(RuntimeError):
     pass
+def _runtime_environment() -> str:
+    value = os.getenv("APP_ENV", "development").strip().lower()
+
+    allowed = {
+        "development",
+        "test",
+        "production",
+    }
+
+    if value not in allowed:
+        raise AuthenticationError("APP_ENV must be one of: development, test, production")
+
+    return value
+
+
+def _allow_supabase_api_auth_fallback() -> bool:
+    value = (
+        os.getenv(
+            "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+            "0",
+        )
+        .strip()
+        .lower()
+    )
+
+    truthy = {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    falsy = {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+    if value in truthy:
+        return True
+
+    if value in falsy:
+        return False
+
+    raise AuthenticationError("ALLOW_SUPABASE_API_AUTH_FALLBACK must be a boolean")
+
+
+def validate_auth_configuration() -> None:
+    environment = _runtime_environment()
+
+    secret = os.getenv(
+        "SUPABASE_JWT_SECRET",
+        "",
+    ).strip()
+
+    allow_api_fallback = _allow_supabase_api_auth_fallback()
+
+    if environment == "production":
+        if not secret:
+            raise AuthenticationError("SUPABASE_JWT_SECRET is required when APP_ENV=production")
+
+        if allow_api_fallback:
+            raise AuthenticationError(
+                "ALLOW_SUPABASE_API_AUTH_FALLBACK must be disabled when APP_ENV=production"
+            )
 
 
 GUEST_SESSION_PREFIX = "gst1"
@@ -416,11 +482,17 @@ def authenticated_user_from_token(
         external_id = claims.get("sub")
 
     else:
-        # No JWT secret:
-        # Supabase API is the only trusted
-        # source of identity.
+        if not _allow_supabase_api_auth_fallback():
+            raise AuthenticationError(
+            "Backend JWT verification is not configured. "
+            "Set SUPABASE_JWT_SECRET or explicitly enable "
+            "ALLOW_SUPABASE_API_AUTH_FALLBACK for non-production development."
+            )
+
         if supabase_user is None:
-            raise AuthenticationError("Invalid authentication token")
+            raise AuthenticationError(
+            "Invalid authentication token"
+                )
 
         external_id = supabase_user.get("id")
 
