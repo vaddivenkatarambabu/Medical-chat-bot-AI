@@ -20,12 +20,12 @@ from flask import Flask, g, jsonify, request
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.auth import (
-    AuthenticationError,
     GUEST_SESSION_COOKIE_NAME,
+    AuthenticationError,
     create_guest_session_credential,
-    normalize_guest_session_id,
     extract_bearer_token,
     get_request_identity,
+    normalize_guest_session_id,
     token_sha256,
     validate_auth_configuration,
 )

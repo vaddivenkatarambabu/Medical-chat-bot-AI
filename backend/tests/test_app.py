@@ -12,7 +12,6 @@ from sqlalchemy import select
 import app as app_module
 import src.auth as auth_module
 from src import models  # noqa: F401
-from src.auth import create_guest_session_credential
 from src.database import Base, engine, session_scope
 from src.models import Conversation, Message, User
 
@@ -627,7 +626,7 @@ def test_guest_session_reuses_existing_valid_cookie(monkeypatch):
 
     client = app_module.create_app().test_client()
 
-    first = _start_guest_session(client)
+    _start_guest_session(client)
     first_cookie = client.get_cookie(auth_module.GUEST_SESSION_COOKIE_NAME)
 
     second = client.post("/api/guest-session")
