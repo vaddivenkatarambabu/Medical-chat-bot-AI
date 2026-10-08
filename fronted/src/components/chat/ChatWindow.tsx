@@ -7,7 +7,7 @@ import { MessageBubble, TypingBubble } from "./MessageBubble";
 import { MedicalDisclaimer } from "./MedicalDisclaimer";
 import { SuggestionCards } from "./SuggestionCards";
 import {
-  ensureGuestSessionId,
+  ensureGuestSession,
   getAccessToken,
   getMessages,
   type ChatMessage,
@@ -155,7 +155,10 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
 
       try {
         const token = await getAccessToken();
-        const guestSessionId = token ? undefined : await ensureGuestSessionId();
+
+        if (!token) {
+          await ensureGuestSession();
+        }
 
         userMessage = createTextMessage("user", value);
 
@@ -175,22 +178,16 @@ export function ChatWindow({ conversationId }: { conversationId: string }) {
 
         if (token) {
           headers.set("Authorization", `Bearer ${token}`);
-        } else if (guestSessionId) {
-          headers.set("X-Guest-Session-Id", guestSessionId);
         }
 
         const res = await fetch(backendUrl("/get"), {
           method: "POST",
           headers,
+          credentials: "include",
           body: JSON.stringify({
             message: value,
             conversation_id: conversationId,
             client_message_id: userMessage.id,
-            ...(guestSessionId
-              ? {
-                  guest_session_id: guestSessionId,
-                }
-              : {}),
           }),
           signal: controller.signal,
         });

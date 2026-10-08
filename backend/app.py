@@ -21,7 +21,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.auth import (
     AuthenticationError,
+    GUEST_SESSION_COOKIE_NAME,
     create_guest_session_credential,
+    normalize_guest_session_id,
     extract_bearer_token,
     get_request_identity,
     token_sha256,
@@ -257,9 +259,21 @@ def _chat_rate_limit_key(payload) -> str:
 
     if token:
         return f"chat:user:{token_sha256(token)}"
-    if payload.guest_session_id:
-        return f"chat:guest:{payload.guest_session_id}"
+    guest_session_id = request.cookies.get(GUEST_SESSION_COOKIE_NAME)
+    if not guest_session_id:
+        guest_session_id = payload.guest_session_id
+
+    if guest_session_id:
+        return f"chat:guest:{token_sha256(guest_session_id)}"
     return f"chat:ip:{_client_ip()}"
+
+
+def _request_has_guest_credential(guest_session_id: str | None = None) -> bool:
+    return bool(
+        request.cookies.get(GUEST_SESSION_COOKIE_NAME)
+        or guest_session_id
+        or request.headers.get("X-Guest-Session-Id")
+    )
 
 
 def _format_history_message(message) -> str:
@@ -441,10 +455,17 @@ def create_app() -> Flask:
     def add_security_headers(response):
         origin = request.headers.get("Origin")
         allowed_origins = _cors_allowed_origins()
-        if origin and ("*" in allowed_origins or origin.rstrip("/") in allowed_origins):
-            response.headers["Access-Control-Allow-Origin"] = (
-                "*" if "*" in allowed_origins else origin
+        if origin and origin.rstrip("/") in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Authorization, X-Guest-Session-Id"
             )
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Max-Age"] = "600"
+            response.headers.add("Vary", "Origin")
+        elif origin and "*" in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = "*"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
             response.headers["Access-Control-Allow-Headers"] = (
                 "Content-Type, Authorization, X-Guest-Session-Id"
@@ -624,13 +645,34 @@ def create_app() -> Flask:
             return limited
 
         try:
+            existing_credential = request.cookies.get(GUEST_SESSION_COOKIE_NAME)
+            if existing_credential:
+                try:
+                    normalize_guest_session_id(existing_credential)
+                    return jsonify({"ok": True})
+                except AuthenticationError:
+                    # Expired/invalid cookies are replaced below.
+                    pass
+
             guest_session_id, expires_at = create_guest_session_credential()
-            return jsonify(
+
+            response = jsonify(
                 {
-                    "guest_session_id": guest_session_id,
+                    "ok": True,
                     "expires_at": expires_at.isoformat(),
                 }
             )
+
+            response.set_cookie(
+                GUEST_SESSION_COOKIE_NAME,
+                guest_session_id,
+                expires=expires_at,
+                httponly=True,
+                secure=os.getenv("APP_ENV", "development").strip().lower() == "production",
+                samesite="Lax",
+                path="/",
+            )
+            return response
         except AuthenticationError as exc:
             return jsonify({"error": str(exc)}), 503
 
@@ -793,8 +835,8 @@ def create_app() -> Flask:
             identity = get_request_identity(
                 request,
                 guest_session_id=guest_session_id,
-                require_auth=guest_session_id is None,
-                require_verified=guest_session_id is None,
+                require_auth=not _request_has_guest_credential(guest_session_id),
+                require_verified=not _request_has_guest_credential(guest_session_id),
             )
             with session_scope() as db:
                 user = chat_repository.resolve_user(db, identity, create=False)
@@ -813,8 +855,8 @@ def create_app() -> Flask:
             identity = get_request_identity(
                 request,
                 guest_session_id=payload.guest_session_id,
-                require_auth=payload.guest_session_id is None,
-                require_verified=payload.guest_session_id is None,
+                require_auth=not _request_has_guest_credential(payload.guest_session_id),
+                require_verified=not _request_has_guest_credential(payload.guest_session_id),
             )
             with session_scope() as db:
                 user = chat_repository.resolve_user(
@@ -846,8 +888,8 @@ def create_app() -> Flask:
             identity = get_request_identity(
                 request,
                 guest_session_id=guest_session_id,
-                require_auth=guest_session_id is None,
-                require_verified=guest_session_id is None,
+                require_auth=not _request_has_guest_credential(guest_session_id),
+                require_verified=not _request_has_guest_credential(guest_session_id),
             )
             with session_scope() as db:
                 user = chat_repository.resolve_user(db, identity, create=False)
@@ -876,8 +918,8 @@ def create_app() -> Flask:
             identity = get_request_identity(
                 request,
                 guest_session_id=payload.guest_session_id,
-                require_auth=payload.guest_session_id is None,
-                require_verified=payload.guest_session_id is None,
+                require_auth=not _request_has_guest_credential(payload.guest_session_id),
+                require_verified=not _request_has_guest_credential(payload.guest_session_id),
             )
             with session_scope() as db:
                 user = chat_repository.resolve_user(db, identity, create=False)
@@ -909,8 +951,8 @@ def create_app() -> Flask:
             identity = get_request_identity(
                 request,
                 guest_session_id=guest_session_id,
-                require_auth=guest_session_id is None,
-                require_verified=guest_session_id is None,
+                require_auth=not _request_has_guest_credential(guest_session_id),
+                require_verified=not _request_has_guest_credential(guest_session_id),
             )
             with session_scope() as db:
                 user = chat_repository.resolve_user(db, identity, create=False)

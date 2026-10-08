@@ -289,7 +289,56 @@ def test_chat_accepts_json_payload(monkeypatch):
     assert response.get_json()["answer"] == "answer for What is cough?"
 
 
+def _start_guest_session(client):
+    response = client.post(
+        "/api/guest-session",
+        headers={"Origin": "http://127.0.0.1:8080"},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+    assert auth_module.GUEST_SESSION_COOKIE_NAME in response.headers["Set-Cookie"]
+    return response
+
+
+def test_guest_session_endpoint_issues_http_only_cookie(monkeypatch):
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-secret",
+    )
+
+    client = app_module.create_app().test_client()
+
+    response = _start_guest_session(client)
+
+    set_cookie = response.headers["Set-Cookie"]
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=Lax" in set_cookie
+    assert "Secure" not in set_cookie
+    assert "guest_session_id" not in response.get_json()
+    assert response.headers["Access-Control-Allow-Credentials"] == "true"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:8080"
+
+
+def test_guest_session_endpoint_requires_secret(monkeypatch):
+    monkeypatch.delenv(
+        "GUEST_SESSION_SECRET",
+        raising=False,
+    )
+
+    client = app_module.create_app().test_client()
+
+    response = client.post("/api/guest-session")
+
+    assert response.status_code == 503
+    assert "GUEST_SESSION_SECRET is required" in response.get_json()["error"]
+
+
 def test_chat_persists_guest_turn(monkeypatch):
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-secret",
+    )
+
     monkeypatch.setattr(
         app_module,
         "get_rag_chain",
@@ -297,6 +346,7 @@ def test_chat_persists_guest_turn(monkeypatch):
     )
 
     client = app_module.create_app().test_client()
+    _start_guest_session(client)
 
     response = client.post(
         "/get",
@@ -304,7 +354,6 @@ def test_chat_persists_guest_turn(monkeypatch):
             "message": "What is cough?",
             "conversation_id": "guest",
             "client_message_id": "client-message-1",
-            "guest_session_id": "guest-session-1",
         },
     )
 
@@ -312,17 +361,20 @@ def test_chat_persists_guest_turn(monkeypatch):
 
     with session_scope() as db:
         users = list(db.scalars(select(User)))
-
         conversations = list(db.scalars(select(Conversation)))
-
         messages = list(db.scalars(select(Message).order_by(Message.created_at)))
 
     assert len(users) == 1
     assert users[0].auth_provider == "guest"
-    assert users[0].external_id == "guest-session-1"
+    assert users[0].external_id
+
+    credential_cookie = client.get_cookie(auth_module.GUEST_SESSION_COOKIE_NAME)
+    assert credential_cookie is not None
+    guest_session_id = auth_module.normalize_guest_session_id(credential_cookie.value)
+    assert users[0].external_id == guest_session_id
 
     assert len(conversations) == 1
-    assert conversations[0].external_id == "guest:guest-session-1"
+    assert conversations[0].external_id == f"guest:{guest_session_id}"
 
     assert [message.role for message in messages] == [
         "user",
@@ -330,13 +382,45 @@ def test_chat_persists_guest_turn(monkeypatch):
     ]
 
     assert messages[0].content == "What is cough?"
-
     assert messages[1].content == "answer for What is cough?"
+
+
+def test_guest_cookie_authenticates_conversation_routes(monkeypatch):
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-secret",
+    )
+
+    client = app_module.create_app().test_client()
+    _start_guest_session(client)
+
+    created = client.post(
+        "/api/conversations",
+        json={},
+    )
+
+    assert created.status_code == 201
+
+    conversation_id = created.get_json()["id"]
+
+    listed = client.get("/api/conversations")
+    messages = client.get(
+        f"/api/conversations/{conversation_id}/messages",
+    )
+
+    assert listed.status_code == 200
+    assert messages.status_code == 200
+    assert listed.get_json()[0]["id"] == conversation_id
 
 
 def test_chat_saves_turn_to_created_conversation(
     monkeypatch,
 ):
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-secret",
+    )
+
     monkeypatch.setattr(
         app_module,
         "get_rag_chain",
@@ -344,12 +428,11 @@ def test_chat_saves_turn_to_created_conversation(
     )
 
     client = app_module.create_app().test_client()
+    _start_guest_session(client)
 
     created = client.post(
         "/api/conversations",
-        json={
-            "guest_session_id": "guest-session-1",
-        },
+        json={},
     )
 
     assert created.status_code == 201
@@ -362,7 +445,6 @@ def test_chat_saves_turn_to_created_conversation(
             "message": "What is cough?",
             "conversation_id": conversation_id,
             "client_message_id": "client-message-1",
-            "guest_session_id": "guest-session-1",
         },
     )
 
@@ -370,17 +452,9 @@ def test_chat_saves_turn_to_created_conversation(
 
     messages = client.get(
         f"/api/conversations/{conversation_id}/messages",
-        query_string={
-            "guest_session_id": "guest-session-1",
-        },
     )
 
-    conversations = client.get(
-        "/api/conversations",
-        query_string={
-            "guest_session_id": "guest-session-1",
-        },
-    )
+    conversations = client.get("/api/conversations")
 
     assert messages.status_code == 200
 
@@ -390,7 +464,6 @@ def test_chat_saves_turn_to_created_conversation(
     ]
 
     assert conversations.status_code == 200
-
     assert conversations.get_json()[0]["title"] == "What is cough?"
 
 
@@ -454,6 +527,11 @@ def test_chat_is_rate_limited(monkeypatch):
 def test_chat_includes_recent_conversation_history(
     monkeypatch,
 ):
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-secret",
+    )
+
     monkeypatch.setattr(
         app_module,
         "get_rag_chain",
@@ -461,10 +539,11 @@ def test_chat_includes_recent_conversation_history(
     )
 
     client = app_module.create_app().test_client()
+    _start_guest_session(client)
 
     created = client.post(
         "/api/conversations",
-        json={"guest_session_id": "guest-session-1"},
+        json={},
     )
 
     conversation_id = created.get_json()["id"]
@@ -475,7 +554,6 @@ def test_chat_includes_recent_conversation_history(
             "message": "What is fever?",
             "conversation_id": conversation_id,
             "client_message_id": "client-message-1",
-            "guest_session_id": "guest-session-1",
         },
     )
 
@@ -485,7 +563,6 @@ def test_chat_includes_recent_conversation_history(
             "message": "What did I ask before?",
             "conversation_id": conversation_id,
             "client_message_id": "client-message-2",
-            "guest_session_id": "guest-session-1",
         },
     )
 
@@ -493,13 +570,17 @@ def test_chat_includes_recent_conversation_history(
     assert second.status_code == 200
 
     assert "User: What is fever?" in FakeChain.calls[-1]["conversation_history"]
-
     assert "Assistant: answer for What is fever?" in FakeChain.calls[-1]["conversation_history"]
 
 
 def test_duplicate_client_message_returns_saved_answer(
     monkeypatch,
 ):
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-secret",
+    )
+
     chain = FakeChain()
 
     monkeypatch.setattr(
@@ -509,12 +590,12 @@ def test_duplicate_client_message_returns_saved_answer(
     )
 
     client = app_module.create_app().test_client()
+    _start_guest_session(client)
 
     payload = {
         "message": "What is fever?",
         "conversation_id": "guest",
         "client_message_id": "client-message-1",
-        "guest_session_id": "guest-session-1",
     }
 
     first = client.post(
@@ -538,9 +619,7 @@ def test_duplicate_client_message_returns_saved_answer(
     assert len(FakeChain.calls) == 1
 
 
-def test_guest_session_endpoint_issues_signed_credential(
-    monkeypatch,
-):
+def test_guest_session_reuses_existing_valid_cookie(monkeypatch):
     monkeypatch.setenv(
         "GUEST_SESSION_SECRET",
         "test-secret",
@@ -548,50 +627,20 @@ def test_guest_session_endpoint_issues_signed_credential(
 
     client = app_module.create_app().test_client()
 
-    response = client.post("/api/guest-session")
+    first = _start_guest_session(client)
+    first_cookie = client.get_cookie(auth_module.GUEST_SESSION_COOKIE_NAME)
 
-    assert response.status_code == 200
+    second = client.post("/api/guest-session")
 
-    credential = response.get_json()["guest_session_id"]
+    assert second.status_code == 200
+    assert second.get_json()["ok"] is True
 
-    assert credential.startswith("gst1.")
+    second_cookie = client.get_cookie(auth_module.GUEST_SESSION_COOKIE_NAME)
 
-
-def test_signed_guest_session_persists_under_stable_identity(
-    monkeypatch,
-):
-    monkeypatch.setenv(
-        "GUEST_SESSION_SECRET",
-        "test-secret",
-    )
-
-    monkeypatch.setattr(
-        app_module,
-        "get_rag_chain",
-        lambda: FakeChain(),
-    )
-
-    credential, _expires_at = create_guest_session_credential()
-
-    client = app_module.create_app().test_client()
-
-    response = client.post(
-        "/get",
-        json={
-            "message": "What is cough?",
-            "conversation_id": "guest",
-            "client_message_id": "client-message-1",
-            "guest_session_id": credential,
-        },
-    )
-
-    assert response.status_code == 200
-
-    with session_scope() as db:
-        user = db.scalar(select(User))
-
-    assert user.auth_provider == "guest"
-    assert user.external_id != credential
+    assert first_cookie is not None
+    assert second_cookie is not None
+    assert second_cookie.value == first_cookie.value
+    assert "guest_session_id" not in second.get_json()
 
 
 def test_env_int_rejects_invalid_range(
@@ -738,6 +787,7 @@ def test_verified_jwt_identity_must_match_supabase_user(
     else:
         raise AssertionError("AuthenticationError was not raised")
 
+
 def test_production_auth_requires_jwt_secret(monkeypatch):
     monkeypatch.setenv(
         "APP_ENV",
@@ -761,6 +811,34 @@ def test_production_auth_requires_jwt_secret(monkeypatch):
         auth_module.validate_auth_configuration()
 
 
+def test_production_auth_requires_guest_session_secret(monkeypatch):
+    monkeypatch.setenv(
+        "APP_ENV",
+        "production",
+    )
+
+    monkeypatch.setenv(
+        "SUPABASE_JWT_SECRET",
+        "test-secret",
+    )
+
+    monkeypatch.delenv(
+        "GUEST_SESSION_SECRET",
+        raising=False,
+    )
+
+    monkeypatch.setenv(
+        "ALLOW_SUPABASE_API_AUTH_FALLBACK",
+        "0",
+    )
+
+    with pytest.raises(
+        auth_module.AuthenticationError,
+        match="GUEST_SESSION_SECRET is required",
+    ):
+        auth_module.validate_auth_configuration()
+
+
 def test_production_auth_rejects_api_fallback(monkeypatch):
     monkeypatch.setenv(
         "APP_ENV",
@@ -770,6 +848,11 @@ def test_production_auth_rejects_api_fallback(monkeypatch):
     monkeypatch.setenv(
         "SUPABASE_JWT_SECRET",
         "test-secret",
+    )
+
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-guest-secret",
     )
 
     monkeypatch.setenv(
@@ -793,6 +876,11 @@ def test_production_auth_accepts_secure_configuration(monkeypatch):
     monkeypatch.setenv(
         "SUPABASE_JWT_SECRET",
         "test-secret",
+    )
+
+    monkeypatch.setenv(
+        "GUEST_SESSION_SECRET",
+        "test-guest-secret",
     )
 
     monkeypatch.setenv(

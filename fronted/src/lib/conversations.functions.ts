@@ -1,8 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { backendUrl, getBackendUrl, readApiError } from "@/lib/api";
-import { nanoid } from "nanoid";
 
-const GUEST_SESSION_STORAGE_KEY = "medicore_guest_session_id";
+const LEGACY_GUEST_SESSION_STORAGE_KEY = "medicore_guest_session_id";
+let guestSessionInitialization: Promise<void> | null = null;
 
 const textPartSchema = {
   isValid(value: unknown): value is ChatMessagePart {
@@ -56,67 +56,54 @@ type BackendMessage = {
 };
 
 type GuestSessionResponse = {
-  guest_session_id?: string;
+  ok?: boolean;
+  expires_at?: string;
 };
 
-export function getGuestSessionId(): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    return window.localStorage.getItem(GUEST_SESSION_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-async function requestGuestSessionId(): Promise<string | null> {
+async function requestGuestSession(): Promise<void> {
   if (!getBackendUrl()) {
-    return null;
+    throw new Error("Backend URL is not configured.");
   }
 
-  try {
-    const response = await fetch(backendUrl("/api/guest-session"), {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-    });
+  const response = await fetch(backendUrl("/api/guest-session"), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+  });
 
-    if (!response.ok) {
-      return null;
-    }
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
 
-    const data = (await response.json()) as GuestSessionResponse;
-    return typeof data.guest_session_id === "string"
-      ? data.guest_session_id
-      : null;
-  } catch {
-    return null;
+  const data = (await response
+    .json()
+    .catch(() => ({}))) as GuestSessionResponse;
+
+  if (data.ok !== true) {
+    throw new Error("Guest session initialization failed.");
   }
 }
 
-export async function ensureGuestSessionId(): Promise<string> {
-  if (typeof window === "undefined") {
-    return (await requestGuestSessionId()) ?? nanoid();
+export async function ensureGuestSession(): Promise<void> {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(LEGACY_GUEST_SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore storage cleanup failures. The HttpOnly cookie remains authoritative.
+    }
   }
 
-  const existing = getGuestSessionId();
-  if (existing) {
-    return existing;
+  if (!guestSessionInitialization) {
+    guestSessionInitialization = requestGuestSession().catch((error) => {
+      guestSessionInitialization = null;
+      throw error;
+    });
   }
 
-  const created = (await requestGuestSessionId()) ?? nanoid();
-
-  try {
-    window.localStorage.setItem(GUEST_SESSION_STORAGE_KEY, created);
-  } catch {
-    return created;
-  }
-
-  return created;
+  await guestSessionInitialization;
 }
 
 function normalizeParts(
@@ -125,6 +112,7 @@ function normalizeParts(
 ): ChatMessagePart[] {
   if (Array.isArray(parts)) {
     const valid = parts.filter(textPartSchema.isValid);
+
     if (valid.length > 0) {
       return valid;
     }
@@ -169,33 +157,29 @@ export async function getAccessToken(): Promise<string | null> {
 async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
-  identity: {
-    token?: string | null;
-    guestSessionId?: string | null;
-  } = {},
+  tokenOverride?: string | null,
 ): Promise<T> {
   if (!getBackendUrl()) {
     throw new Error("Backend URL is not configured.");
   }
 
-  const token = identity.token ?? (await getAccessToken());
-  const guestSessionId =
-    identity.guestSessionId ?? (!token ? getGuestSessionId() : null);
+  const token = tokenOverride ?? (await getAccessToken());
   const headers = new Headers(options.headers);
 
   headers.set("Accept", "application/json");
+
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
-  } else if (guestSessionId) {
-    headers.set("X-Guest-Session-Id", guestSessionId);
   }
 
   const response = await fetch(backendUrl(path), {
     ...options,
     headers,
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -209,58 +193,30 @@ async function apiRequest<T>(
   return (await response.json()) as T;
 }
 
-function guestQuery(
-  token: string | null,
-  guestSessionId: string | null,
-): string {
-  return !token && guestSessionId
-    ? `?guest_session_id=${encodeURIComponent(guestSessionId)}`
-    : "";
-}
-
 export async function listConversations(): Promise<ConversationSummary[]> {
   const token = await getAccessToken();
-  const guestSessionId = token ? null : getGuestSessionId();
 
-  if (!token && !guestSessionId) {
-    return [];
+  if (!token) {
+    await ensureGuestSession();
   }
 
-  const query = guestQuery(token, guestSessionId);
-
-  return apiRequest<ConversationSummary[]>(
-    `/api/conversations${query}`,
-    {},
-    {
-      token,
-      guestSessionId,
-    },
-  );
+  return apiRequest<ConversationSummary[]>("/api/conversations", {}, token);
 }
 
 export async function createConversation(data: { title?: string } = {}) {
   const token = await getAccessToken();
-  const guestSessionId = token ? null : await ensureGuestSessionId();
 
-  const body = {
-    ...data,
-    ...(!token && guestSessionId
-      ? {
-          guest_session_id: guestSessionId,
-        }
-      : {}),
-  };
+  if (!token) {
+    await ensureGuestSession();
+  }
 
   return apiRequest<ConversationSummary>(
     "/api/conversations",
     {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify(data),
     },
-    {
-      token,
-      guestSessionId,
-    },
+    token,
   );
 }
 
@@ -269,43 +225,36 @@ export async function renameConversation(data: {
   title: string;
 }): Promise<ConversationSummary> {
   const token = await getAccessToken();
-  const guestSessionId = token ? null : getGuestSessionId();
-  const query = guestQuery(token, guestSessionId);
+
+  if (!token) {
+    await ensureGuestSession();
+  }
 
   return apiRequest<ConversationSummary>(
-    `/api/conversations/${encodeURIComponent(data.id)}${query}`,
+    `/api/conversations/${encodeURIComponent(data.id)}`,
     {
       method: "PATCH",
       body: JSON.stringify({
         title: data.title,
-        ...(!token && guestSessionId
-          ? {
-              guest_session_id: guestSessionId,
-            }
-          : {}),
       }),
     },
-    {
-      token,
-      guestSessionId,
-    },
+    token,
   );
 }
 
 export async function deleteConversation(id: string): Promise<{ ok: true }> {
   const token = await getAccessToken();
-  const guestSessionId = token ? null : getGuestSessionId();
-  const query = guestQuery(token, guestSessionId);
+
+  if (!token) {
+    await ensureGuestSession();
+  }
 
   return apiRequest<{ ok: true }>(
-    `/api/conversations/${encodeURIComponent(id)}${query}`,
+    `/api/conversations/${encodeURIComponent(id)}`,
     {
       method: "DELETE",
     },
-    {
-      token,
-      guestSessionId,
-    },
+    token,
   );
 }
 
@@ -313,21 +262,15 @@ export async function getMessages(
   conversationId: string,
 ): Promise<ChatMessage[]> {
   const token = await getAccessToken();
-  const guestSessionId = token ? null : getGuestSessionId();
 
-  if (!token && !guestSessionId) {
-    return [];
+  if (!token) {
+    await ensureGuestSession();
   }
 
-  const query = guestQuery(token, guestSessionId);
-
   const messages = await apiRequest<BackendMessage[]>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages${query}`,
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
     {},
-    {
-      token,
-      guestSessionId,
-    },
+    token,
   );
 
   return messages

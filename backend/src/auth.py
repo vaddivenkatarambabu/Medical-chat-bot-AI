@@ -18,6 +18,8 @@ from jwt import InvalidTokenError
 
 class AuthenticationError(RuntimeError):
     pass
+
+
 def _runtime_environment() -> str:
     value = os.getenv("APP_ENV", "development").strip().lower()
 
@@ -85,8 +87,12 @@ def validate_auth_configuration() -> None:
                 "ALLOW_SUPABASE_API_AUTH_FALLBACK must be disabled when APP_ENV=production"
             )
 
+        if not _guest_session_secret():
+            raise AuthenticationError("GUEST_SESSION_SECRET is required when APP_ENV=production")
+
 
 GUEST_SESSION_PREFIX = "gst1"
+GUEST_SESSION_COOKIE_NAME = "medicore_guest_session"
 GUEST_SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 DEFAULT_GUEST_SESSION_TTL_DAYS = 30
 MAX_GUEST_SESSION_TTL_DAYS = 90
@@ -161,13 +167,25 @@ def _guest_session_ttl() -> timedelta:
 
 
 def _allow_unsigned_guest_sessions() -> bool:
-    return (
+    value = (
         os.getenv(
             "ALLOW_UNSIGNED_GUEST_SESSIONS",
-            "1",
-        ).strip()
-        != "0"
+            "0",
+        )
+        .strip()
+        .lower()
     )
+
+    truthy = {"1", "true", "yes", "on"}
+    falsy = {"0", "false", "no", "off"}
+
+    if value in truthy:
+        return _runtime_environment() != "production"
+
+    if value in falsy:
+        return False
+
+    raise AuthenticationError("ALLOW_UNSIGNED_GUEST_SESSIONS must be a boolean")
 
 
 def _validate_unsigned_guest_session_id(value: str) -> str:
@@ -196,7 +214,7 @@ def create_guest_session_credential() -> tuple[str, datetime]:
     secret = _guest_session_secret()
 
     if not secret:
-        return session_id, expires_at
+        raise AuthenticationError("GUEST_SESSION_SECRET is required to create guest sessions")
 
     body = f"{GUEST_SESSION_PREFIX}.{session_id}.{int(expires_at.timestamp())}"
 
@@ -484,15 +502,13 @@ def authenticated_user_from_token(
     else:
         if not _allow_supabase_api_auth_fallback():
             raise AuthenticationError(
-            "Backend JWT verification is not configured. "
-            "Set SUPABASE_JWT_SECRET or explicitly enable "
-            "ALLOW_SUPABASE_API_AUTH_FALLBACK for non-production development."
+                "Backend JWT verification is not configured. "
+                "Set SUPABASE_JWT_SECRET or explicitly enable "
+                "ALLOW_SUPABASE_API_AUTH_FALLBACK for non-production development."
             )
 
         if supabase_user is None:
-            raise AuthenticationError(
-            "Invalid authentication token"
-                )
+            raise AuthenticationError("Invalid authentication token")
 
         external_id = supabase_user.get("id")
 
@@ -603,7 +619,7 @@ def get_request_identity(
 
             return RequestIdentity(
                 user=user,
-                guest_session_id=guest_session_id,
+                guest_session_id=None,
             )
 
         except AuthenticationError:
@@ -613,9 +629,17 @@ def get_request_identity(
     if require_auth:
         raise AuthenticationError("Authentication is required")
 
+    cookie_guest_session_id = request.cookies.get(GUEST_SESSION_COOKIE_NAME)
     header_guest_session_id = request.headers.get("X-Guest-Session-Id")
+
+    # Prefer the HttpOnly cookie whenever it exists. Legacy body/header
+    # credentials are retained only for backwards compatibility with
+    # older clients that have not yet migrated.
+    candidate_guest_session_id = (
+        cookie_guest_session_id or guest_session_id or header_guest_session_id
+    )
 
     return RequestIdentity(
         user=None,
-        guest_session_id=normalize_guest_session_id(guest_session_id or header_guest_session_id),
+        guest_session_id=normalize_guest_session_id(candidate_guest_session_id),
     )
