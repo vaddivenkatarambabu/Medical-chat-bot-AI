@@ -134,13 +134,6 @@ def _env_float(
     return parsed
 
 
-def _get_message() -> str:
-    try:
-        return parse_chat_payload(request).message
-    except RequestValidationError:
-        return ""
-
-
 def _cors_allowed_origins() -> set[str]:
     configured = set(DEFAULT_DEV_CORS_ORIGINS)
     configured.update(
@@ -346,7 +339,6 @@ def _load_chat_context(payload, identity) -> tuple[str, str | None]:
         user = chat_repository.resolve_user(
             db,
             identity,
-            create=False,
             user_agent=request.headers.get("User-Agent"),
             ip_address=_client_ip(),
         )
@@ -554,7 +546,6 @@ def create_app() -> Flask:
                 user = chat_repository.resolve_user(
                     db,
                     identity,
-                    create=True,
                     user_agent=request.headers.get("User-Agent"),
                     ip_address=_client_ip(),
                 )
@@ -583,7 +574,6 @@ def create_app() -> Flask:
                 user = chat_repository.resolve_user(
                     db,
                     identity,
-                    create=True,
                     user_agent=request.headers.get("User-Agent"),
                     ip_address=_client_ip(),
                 )
@@ -839,7 +829,7 @@ def create_app() -> Flask:
                 require_verified=not _request_has_guest_credential(guest_session_id),
             )
             with session_scope() as db:
-                user = chat_repository.resolve_user(db, identity, create=False)
+                user = chat_repository.resolve_user(db, identity)
                 conversations = chat_repository.list_conversations(db, user)
                 return jsonify([serialize_conversation(item) for item in conversations])
         except AuthenticationError as exc:
@@ -862,7 +852,6 @@ def create_app() -> Flask:
                 user = chat_repository.resolve_user(
                     db,
                     identity,
-                    create=True,
                     user_agent=request.headers.get("User-Agent"),
                     ip_address=_client_ip(),
                 )
@@ -892,7 +881,7 @@ def create_app() -> Flask:
                 require_verified=not _request_has_guest_credential(guest_session_id),
             )
             with session_scope() as db:
-                user = chat_repository.resolve_user(db, identity, create=False)
+                user = chat_repository.resolve_user(db, identity)
                 conversation = chat_repository.get_conversation_for_user(
                     db,
                     user,
@@ -922,7 +911,7 @@ def create_app() -> Flask:
                 require_verified=not _request_has_guest_credential(payload.guest_session_id),
             )
             with session_scope() as db:
-                user = chat_repository.resolve_user(db, identity, create=False)
+                user = chat_repository.resolve_user(db, identity)
                 conversation = chat_repository.get_conversation_for_user(
                     db,
                     user,
@@ -955,7 +944,7 @@ def create_app() -> Flask:
                 require_verified=not _request_has_guest_credential(guest_session_id),
             )
             with session_scope() as db:
-                user = chat_repository.resolve_user(db, identity, create=False)
+                user = chat_repository.resolve_user(db, identity)
                 conversation = chat_repository.get_conversation_for_user(
                     db,
                     user,

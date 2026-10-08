@@ -17,7 +17,7 @@ const textPartSchema = {
   },
 };
 
-export type ChatMessagePart = {
+type ChatMessagePart = {
   type: "text";
   text: string;
   state?: "streaming" | "done";
@@ -215,28 +215,6 @@ export async function createConversation(data: { title?: string } = {}) {
     {
       method: "POST",
       body: JSON.stringify(data),
-    },
-    token,
-  );
-}
-
-export async function renameConversation(data: {
-  id: string;
-  title: string;
-}): Promise<ConversationSummary> {
-  const token = await getAccessToken();
-
-  if (!token) {
-    await ensureGuestSession();
-  }
-
-  return apiRequest<ConversationSummary>(
-    `/api/conversations/${encodeURIComponent(data.id)}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        title: data.title,
-      }),
     },
     token,
   );

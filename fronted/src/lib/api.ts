@@ -3,7 +3,7 @@ const DEFAULT_DEV_BACKEND_URL = "http://127.0.0.1:1819";
 const serverEnv =
   typeof process !== "undefined" && process.env ? process.env : {};
 
-export const BACKEND_URL = (
+const BACKEND_URL = (
   import.meta.env.VITE_BACKEND_URL ||
   serverEnv.VITE_BACKEND_URL ||
   serverEnv.BACKEND_URL ||

@@ -8,11 +8,7 @@ from src.auth import AuthenticatedUser, RequestIdentity
 from src.models import Conversation, Message, User, UserSession, new_uuid
 
 
-class RepositoryError(RuntimeError):
-    pass
-
-
-class NotFoundError(RepositoryError):
+class NotFoundError(RuntimeError):
     pass
 
 
@@ -90,7 +86,6 @@ class ChatRepository:
         db: Session,
         identity: RequestIdentity,
         *,
-        create: bool,
         user_agent: str | None = None,
         ip_address: str | None = None,
     ) -> User | None:
@@ -105,8 +100,6 @@ class ChatRepository:
         if identity.guest_session_id:
             return self._upsert_guest_user(db, identity.guest_session_id)
 
-        if create:
-            return None
         return None
 
     def _upsert_authenticated_user(
@@ -146,10 +139,6 @@ class ChatRepository:
             user.email_verified_at = auth_user.email_verified_at
             user.last_login_at = _now()
             user.updated_at = _now()
-
-        user.email_verified = auth_user.email_verified
-        user.email_verified_at = auth_user.email_verified_at
-        user.last_login_at = _now()
 
         if auth_user.token_hash:
             session = db.scalar(
@@ -352,7 +341,6 @@ class ChatRepository:
         user = self.resolve_user(
             db,
             identity,
-            create=True,
             user_agent=user_agent,
             ip_address=ip_address,
         )
