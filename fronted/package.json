@@ -24,7 +24,7 @@
     "@tanstack/react-start": "^1.167.50",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "framer-motion": "^12.40.0",
+    "framer-motion": "^14.1.0",
     "lucide-react": "^1.17.0",
     "nanoid": "^5.1.11",
     "react": "^19.2.0",
